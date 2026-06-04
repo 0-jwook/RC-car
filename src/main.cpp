@@ -68,6 +68,15 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 #define WATCHDOG_MS  500    // 500ms 이상 명령 없으면 자동 정지
 
 // =============================================================
+// [사용자 설정] 가감속 (10ms 업데이트 주기 기준)
+// 값이 클수록 변화가 빠름 (255 기준)
+// 예: ACCEL_STEP=8 → 0→최대 약 320ms
+//     DECEL_STEP=16 → 최대→0 약 160ms
+// =============================================================
+#define ACCEL_STEP   8    // 가속 스텝
+#define DECEL_STEP   16   // 감속 스텝 (가속보다 빠르게 멈춤)
+
+// =============================================================
 // [사용자 설정] 모터 방향 반전 보정
 // 모터가 반대로 돌면 해당 값을 true 로 변경
 // 예: 전방 좌측이 반대로 돌면 INVERT_M1 = true
@@ -78,15 +87,22 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 #define INVERT_M3    true   // Rear-Left   (좌측 반전 보정)
 #define INVERT_M4    false  // Rear-Right
 
+// 채널별 DIR 핀 / 반전 배열 (updateMotors 루프에서 사용)
+static const uint8_t kDirPin[4] = {M1_DIR_PIN, M2_DIR_PIN, M3_DIR_PIN, M4_DIR_PIN};
+static const bool    kInvert[4] = {INVERT_M1,  INVERT_M2,  INVERT_M3,  INVERT_M4};
+
 // =============================================================
 // 전역 객체 / 변수
 // =============================================================
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-// 워치독: 마지막 명령 수신 시각 (loop()와 WS 콜백 양쪽에서 접근)
-volatile unsigned long lastCmdMs  = 0;
-volatile bool          motorsOn   = false;
+volatile unsigned long lastCmdMs   = 0;
+volatile bool          motorsOn    = false;
+
+float targetV[4]  = {0, 0, 0, 0};   // 목표 출력 (-255~+255)
+float currentV[4] = {0, 0, 0, 0};   // 현재 출력 (가감속 적용)
+unsigned long lastMotorMs = 0;
 
 // =============================================================
 // 모터 초기화
@@ -137,9 +153,10 @@ static inline void setMotor(uint8_t ch, uint8_t dirPin, int value, bool invert) 
 }
 
 // =============================================================
-// 전체 모터 즉시 정지
+// 전체 모터 즉시 정지 (안전 이벤트: 연결 끊김, 워치독)
 // =============================================================
 void stopAll() {
+    for (int i = 0; i < 4; i++) { targetV[i] = 0; currentV[i] = 0; }
     ledcWrite(CH_M1, 0);
     ledcWrite(CH_M2, 0);
     ledcWrite(CH_M3, 0);
@@ -180,21 +197,41 @@ void driveRobot(float vx, float vy, float w, float speed) {
         if (a > maxAbs) maxAbs = a;
     }
 
-    // 3. 속도 스케일 적용 → -255 ~ +255
+    // 3. 속도 스케일 적용 → targetV[] 에 저장 (실제 출력은 updateMotors()가 담당)
     float scale = (speed / 100.0f) * 255.0f / maxAbs;
-
-    int v[4];
-    bool anyNonZero = false;
     for (int i = 0; i < 4; i++) {
-        v[i] = (int)(raw[i] * scale);
-        if (v[i] != 0) anyNonZero = true;
+        targetV[i] = raw[i] * scale;
     }
+    motorsOn = true;
+}
 
-    // 4. 각 모터 출력
-    setMotor(CH_M1, M1_DIR_PIN, v[0], INVERT_M1);
-    setMotor(CH_M2, M2_DIR_PIN, v[1], INVERT_M2);
-    setMotor(CH_M3, M3_DIR_PIN, v[2], INVERT_M3);
-    setMotor(CH_M4, M4_DIR_PIN, v[3], INVERT_M4);
+// =============================================================
+// 가감속 적용 후 모터 출력 (loop()에서 10ms마다 호출)
+//
+// currentV → targetV 방향으로 스텝씩 이동:
+//   속력이 커지는 방향 → ACCEL_STEP
+//   속력이 작아지는 방향 → DECEL_STEP (감속이 더 빠름)
+// =============================================================
+void updateMotors() {
+    bool anyNonZero = false;
+
+    for (int i = 0; i < 4; i++) {
+        float diff    = targetV[i] - currentV[i];
+        float absDiff = fabsf(diff);
+
+        if (absDiff < 0.5f) {
+            currentV[i] = targetV[i];   // 목표에 충분히 가까우면 즉시 고정
+        } else {
+            // 현재 속력보다 목표 속력이 크면 가속, 아니면 감속
+            float rate = (fabsf(targetV[i]) >= fabsf(currentV[i]))
+                         ? (float)ACCEL_STEP
+                         : (float)DECEL_STEP;
+            currentV[i] += (diff > 0) ? rate : -rate;
+        }
+
+        setMotor(i, kDirPin[i], (int)currentV[i], kInvert[i]);
+        if ((int)currentV[i] != 0) anyNonZero = true;
+    }
 
     motorsOn = anyNonZero;
 }
@@ -385,15 +422,20 @@ void setup() {
 // loop()
 // =============================================================
 void loop() {
+    unsigned long now = millis();
+
+    // ── 가감속 모터 업데이트 (100 Hz) ───────────────────────
+    if (now - lastMotorMs >= 10) {
+        lastMotorMs = now;
+        updateMotors();
+    }
+
     // ── 워치독 ──────────────────────────────────────────────
-    // 모터가 동작 중인데 일정 시간 명령이 없으면 자동 정지
-    if (motorsOn && (millis() - lastCmdMs > WATCHDOG_MS)) {
+    if (motorsOn && (now - lastCmdMs > WATCHDOG_MS)) {
         stopAll();
         Serial.println("[WD] Watchdog triggered: motors stopped");
     }
 
-    // ── WebSocket 클라이언트 정리 (메모리 누수 방지) ──────
+    // ── WebSocket 클라이언트 정리 ────────────────────────────
     ws.cleanupClients();
-
-    delay(10);
 }
