@@ -212,18 +212,20 @@ void driveRobot(float vx, float vy, float w, float speed) {
 // =============================================================
 bool dirToVector(const char* dir, float &vx, float &vy, float &w) {
     vx = 0; vy = 0; w = 0;
-    if      (strcmp(dir, "F")   == 0) {          vy= 1;           }
-    else if (strcmp(dir, "B")   == 0) {          vy=-1;           }
-    else if (strcmp(dir, "L")   == 0) { vx=-1;                    }
-    else if (strcmp(dir, "R")   == 0) { vx= 1;                    }
-    else if (strcmp(dir, "FL")  == 0) { vx=-1; vy= 1;             }
-    else if (strcmp(dir, "FR")  == 0) { vx= 1; vy= 1;             }
-    else if (strcmp(dir, "BL")  == 0) { vx=-1; vy=-1;             }
-    else if (strcmp(dir, "BR")  == 0) { vx= 1; vy=-1;             }
-    else if (strcmp(dir, "CW")  == 0) {                   w= 1;   }
-    else if (strcmp(dir, "CCW") == 0) {                   w=-1;   }
-    else if (strcmp(dir, "S")   == 0) { /* 모두 0 */               }
-    else return false;   // 알 수 없는 명령
+    // 팀원 프로토콜 (nota.mieung.kr)
+    if      (strcmp(dir, "up")         == 0) {          vy= 1;  }
+    else if (strcmp(dir, "down")       == 0) {          vy=-1;  }
+    else if (strcmp(dir, "left")       == 0) { vx=-1;           }
+    else if (strcmp(dir, "right")      == 0) { vx= 1;           }
+    else if (strcmp(dir, "up-left")    == 0) { vx=-1; vy= 1;    }
+    else if (strcmp(dir, "up-right")   == 0) { vx= 1; vy= 1;    }
+    else if (strcmp(dir, "down-left")  == 0) { vx=-1; vy=-1;    }
+    else if (strcmp(dir, "down-right") == 0) { vx= 1; vy=-1;    }
+    // 기존 단축 명령 (하위 호환)
+    else if (strcmp(dir, "CW")  == 0) {               w= 1;     }
+    else if (strcmp(dir, "CCW") == 0) {               w=-1;     }
+    else if (strcmp(dir, "S")   == 0) { /* 모두 0 */             }
+    else return false;
     return true;
 }
 
@@ -275,12 +277,12 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
                 StaticJsonDocument<128> doc;
                 DeserializationError err = deserializeJson(doc, buf);
 
-                if (!err && doc.containsKey("dir")) {
-                    // ── [1] 방향 명령 JSON ─────────────────────
-                    const char* dir = doc["dir"] | "S";
+                if (!err && doc.containsKey("direction")) {
+                    // ── [1] 방향 명령 JSON (팀원 프로토콜) ──────
+                    const char* dir = doc["direction"] | "S";
                     if (!dirToVector(dir, vx, vy, w)) return;
                     speed = constrain((float)(doc["speed"] | 80.0f), 0.0f, 100.0f);
-                    Serial.printf("[CMD] dir=%s  speed=%.0f\n", dir, speed);
+                    Serial.printf("[CMD] direction=%s  speed=%.0f\n", dir, speed);
 
                 } else if (!err && doc.containsKey("vx")) {
                     // ── [2] 벡터 명령 JSON (웹 UI) ────────────
