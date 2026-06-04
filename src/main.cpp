@@ -200,8 +200,48 @@ void driveRobot(float vx, float vy, float w, float speed) {
 }
 
 // =============================================================
+// 방향 문자열 → (vx, vy, w) 변환
+//
+// 지원 명령어 (대소문자 구분):
+//   "F"   전진          "B"   후진
+//   "L"   좌 스트레이프  "R"   우 스트레이프
+//   "FL"  전진+좌대각    "FR"  전진+우대각
+//   "BL"  후진+좌대각    "BR"  후진+우대각
+//   "CW"  시계방향 회전  "CCW" 반시계방향 회전
+//   "S"   정지
+// =============================================================
+bool dirToVector(const char* dir, float &vx, float &vy, float &w) {
+    vx = 0; vy = 0; w = 0;
+    if      (strcmp(dir, "F")   == 0) {          vy= 1;           }
+    else if (strcmp(dir, "B")   == 0) {          vy=-1;           }
+    else if (strcmp(dir, "L")   == 0) { vx=-1;                    }
+    else if (strcmp(dir, "R")   == 0) { vx= 1;                    }
+    else if (strcmp(dir, "FL")  == 0) { vx=-1; vy= 1;             }
+    else if (strcmp(dir, "FR")  == 0) { vx= 1; vy= 1;             }
+    else if (strcmp(dir, "BL")  == 0) { vx=-1; vy=-1;             }
+    else if (strcmp(dir, "BR")  == 0) { vx= 1; vy=-1;             }
+    else if (strcmp(dir, "CW")  == 0) {                   w= 1;   }
+    else if (strcmp(dir, "CCW") == 0) {                   w=-1;   }
+    else if (strcmp(dir, "S")   == 0) { /* 모두 0 */               }
+    else return false;   // 알 수 없는 명령
+    return true;
+}
+
+// =============================================================
 // WebSocket 이벤트 핸들러
-// (ESPAsyncWebServer는 내부적으로 Core 0의 네트워크 태스크에서 실행)
+//
+// 두 가지 프로토콜을 동시 지원:
+//
+// [1] 방향 명령 (팀원용 단순 프로토콜)
+//     {"dir": "F"}                    ← 기본 속도(80%)로 전진
+//     {"dir": "FL", "speed": 60}      ← 속도 지정 가능
+//     또는 JSON 없이 문자열만: "F"
+//
+// [2] 벡터 명령 (웹 UI / 정밀 제어)
+//     {"vx": 0.5, "vy": 0.8, "w": 0.0, "speed": 80}
+//
+// ※ 워치독(500ms): 명령을 계속 보내야 동작 유지됨.
+//    정지시키려면 "S" 또는 연결을 끊으면 됨.
 // =============================================================
 void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
                AwsEventType type, void* arg, uint8_t* data, size_t len)
@@ -216,32 +256,47 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
 
         case WS_EVT_DISCONNECT:
             Serial.printf("[WS] Client #%u disconnected\n", client->id());
-            stopAll();                  // 연결 끊기면 즉시 정지
+            stopAll();
             break;
 
         case WS_EVT_DATA: {
             AwsFrameInfo* info = (AwsFrameInfo*)arg;
-            // 텍스트 프레임이 단일 조각(fragmentation 없음)인 경우만 처리
             if (info->final && info->index == 0 &&
                 info->len == len && info->opcode == WS_TEXT)
             {
-                if (len == 0 || len >= 128) return;   // 비정상 길이 무시
+                if (len == 0 || len >= 128) return;
 
-                // null-terminate 후 JSON 파싱
                 char buf[128];
                 memcpy(buf, data, len);
                 buf[len] = '\0';
 
-                StaticJsonDocument<128> doc;
-                if (deserializeJson(doc, buf) != DeserializationError::Ok) return;
+                float vx = 0, vy = 0, w = 0, speed = 80.0f;
 
-                float vx    = constrain((float)(doc["vx"]    | 0.0f), -1.0f, 1.0f);
-                float vy    = constrain((float)(doc["vy"]    | 0.0f), -1.0f, 1.0f);
-                float w     = constrain((float)(doc["w"]     | 0.0f), -1.0f, 1.0f);
-                float speed = constrain((float)(doc["speed"] | 50.0f), 0.0f, 100.0f);
+                StaticJsonDocument<128> doc;
+                DeserializationError err = deserializeJson(doc, buf);
+
+                if (!err && doc.containsKey("dir")) {
+                    // ── [1] 방향 명령 JSON ─────────────────────
+                    const char* dir = doc["dir"] | "S";
+                    if (!dirToVector(dir, vx, vy, w)) return;
+                    speed = constrain((float)(doc["speed"] | 80.0f), 0.0f, 100.0f);
+                    Serial.printf("[CMD] dir=%s  speed=%.0f\n", dir, speed);
+
+                } else if (!err && doc.containsKey("vx")) {
+                    // ── [2] 벡터 명령 JSON (웹 UI) ────────────
+                    vx    = constrain((float)(doc["vx"]    | 0.0f), -1.0f, 1.0f);
+                    vy    = constrain((float)(doc["vy"]    | 0.0f), -1.0f, 1.0f);
+                    w     = constrain((float)(doc["w"]     | 0.0f), -1.0f, 1.0f);
+                    speed = constrain((float)(doc["speed"] | 50.0f), 0.0f, 100.0f);
+
+                } else {
+                    // ── [3] 평문 방향 문자열: "F", "BL" 등 ────
+                    if (!dirToVector(buf, vx, vy, w)) return;
+                    Serial.printf("[CMD] plain=%s\n", buf);
+                }
 
                 driveRobot(vx, vy, w, speed);
-                lastCmdMs = millis();   // 워치독 타이머 리셋
+                lastCmdMs = millis();
             }
             break;
         }
