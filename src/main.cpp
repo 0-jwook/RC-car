@@ -409,47 +409,39 @@ void setup() {
         req->send(200, "text/html", index_html);
     });
 
-    // ── POST /direction  {"direction":"up","speed":50} ──────
-    // CORS preflight (브라우저 cross-origin 요청 허용)
-    server.on("/direction", HTTP_OPTIONS, [](AsyncWebServerRequest* req) {
-        AsyncWebServerResponse* res = req->beginResponse(200);
-        res->addHeader("Access-Control-Allow-Origin",  "*");
-        res->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-        res->addHeader("Access-Control-Allow-Headers", "Content-Type");
-        req->send(res);
-    });
+    // ── GET /direction?direction=up&speed=50 ────────────────
+    server.on("/direction", HTTP_GET, [](AsyncWebServerRequest* req) {
+        AsyncWebServerResponse* res;
 
-    server.on("/direction", HTTP_POST,
-        // 응답 핸들러
-        [](AsyncWebServerRequest* req) {
-            AsyncWebServerResponse* res =
-                req->beginResponse(200, "application/json", "{\"status\":\"ok\"}");
+        if (!req->hasParam("direction")) {
+            res = req->beginResponse(400, "application/json", "{\"status\":\"error\",\"msg\":\"missing direction\"}");
             res->addHeader("Access-Control-Allow-Origin", "*");
             req->send(res);
-        },
-        nullptr,
-        // 바디 핸들러
-        [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-            if (index != 0 || len == 0 || len >= 128) return;
-
-            char buf[128];
-            memcpy(buf, data, len);
-            buf[len] = '\0';
-
-            StaticJsonDocument<128> doc;
-            if (deserializeJson(doc, buf) != DeserializationError::Ok) return;
-            if (!doc.containsKey("direction")) return;
-
-            float vx, vy, w;
-            const char* dir = doc["direction"] | "center";
-            if (!dirToVector(dir, vx, vy, w)) return;
-
-            float speed = constrain((float)(doc["speed"] | 50.0f), 0.0f, 100.0f);
-            driveRobot(vx, vy, w, speed);
-            lastCmdMs = millis();
-            Serial.printf("[HTTP] direction=%s  speed=%.0f\n", dir, speed);
+            return;
         }
-    );
+
+        String dir = req->getParam("direction")->value();
+        float vx, vy, w;
+        if (!dirToVector(dir.c_str(), vx, vy, w)) {
+            res = req->beginResponse(400, "application/json", "{\"status\":\"error\",\"msg\":\"unknown direction\"}");
+            res->addHeader("Access-Control-Allow-Origin", "*");
+            req->send(res);
+            return;
+        }
+
+        float speed = 50.0f;
+        if (req->hasParam("speed")) {
+            speed = constrain(req->getParam("speed")->value().toFloat(), 0.0f, 100.0f);
+        }
+
+        driveRobot(vx, vy, w, speed);
+        lastCmdMs = millis();
+        Serial.printf("[HTTP] direction=%s  speed=%.0f\n", dir.c_str(), speed);
+
+        res = req->beginResponse(200, "application/json", "{\"status\":\"ok\"}");
+        res->addHeader("Access-Control-Allow-Origin", "*");
+        req->send(res);
+    });
 
     // ── 404 핸들러 ──
     server.onNotFound([](AsyncWebServerRequest* req) {
