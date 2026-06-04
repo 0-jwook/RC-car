@@ -310,7 +310,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
                 memcpy(buf, data, len);
                 buf[len] = '\0';
 
-                float vx = 0, vy = 0, w = 0, speed = 80.0f;
+                float vx = 0, vy = 0, w = 0, speed = 50.0f;
 
                 StaticJsonDocument<128> doc;
                 DeserializationError err = deserializeJson(doc, buf);
@@ -319,7 +319,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
                     // ── [1] 방향 명령 JSON (팀원 프로토콜) ──────
                     const char* dir = doc["direction"] | "S";
                     if (!dirToVector(dir, vx, vy, w)) return;
-                    speed = constrain((float)(doc["speed"] | 80.0f), 0.0f, 100.0f);
+                    speed = constrain((float)(doc["speed"] | 50.0f), 0.0f, 100.0f);
                     Serial.printf("[CMD] direction=%s  speed=%.0f\n", dir, speed);
 
                 } else if (!err && doc.containsKey("vx")) {
