@@ -221,6 +221,7 @@ bool dirToVector(const char* dir, float &vx, float &vy, float &w) {
     else if (strcmp(dir, "up-right")   == 0) { vx= 1; vy= 1;    }
     else if (strcmp(dir, "down-left")  == 0) { vx=-1; vy=-1;    }
     else if (strcmp(dir, "down-right") == 0) { vx= 1; vy=-1;    }
+    else if (strcmp(dir, "center")     == 0) { /* 정지 */        }
     // 기존 단축 명령 (하위 호환)
     else if (strcmp(dir, "CW")  == 0) {               w= 1;     }
     else if (strcmp(dir, "CCW") == 0) {               w=-1;     }
