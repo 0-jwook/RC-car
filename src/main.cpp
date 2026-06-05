@@ -429,14 +429,9 @@ void setup() {
             return;
         }
 
-        float speed = 50.0f;
-        if (req->hasParam("speed")) {
-            speed = constrain(req->getParam("speed")->value().toFloat(), 0.0f, 100.0f);
-        }
-
-        driveRobot(vx, vy, w, speed);
+        driveRobot(vx, vy, w, 50.0f);
         lastCmdMs = millis();
-        Serial.printf("[HTTP] direction=%s  speed=%.0f\n", dir.c_str(), speed);
+        Serial.printf("[HTTP] direction=%s\n", dir.c_str());
 
         res = req->beginResponse(200, "application/json", "{\"status\":\"ok\"}");
         res->addHeader("Access-Control-Allow-Origin", "*");
