@@ -78,11 +78,11 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 // =============================================================
 // [사용자 설정] 가감속 (10ms 업데이트 주기 기준)
 // 값이 클수록 변화가 빠름 (255 기준)
-// 예: ACCEL_STEP=8 → 0→최대 약 320ms
-//     DECEL_STEP=16 → 최대→0 약 160ms
+// 예: ACCEL_STEP=3 → 0→127(50%) 약 420ms
+//     DECEL_STEP=6 → 127→0       약 210ms
 // =============================================================
-#define ACCEL_STEP   8    // 가속 스텝
-#define DECEL_STEP   16   // 감속 스텝 (가속보다 빠르게 멈춤)
+#define ACCEL_STEP   3    // 가속 스텝
+#define DECEL_STEP   6    // 감속 스텝 (가속보다 빠르게 멈춤)
 
 // =============================================================
 // [사용자 설정] 모터 방향 반전 보정
@@ -220,7 +220,8 @@ void driveRobot(float vx, float vy, float w, float speed) {
 //   속력이 작아지는 방향 → DECEL_STEP (감속이 더 빠름)
 // =============================================================
 void updateMotors() {
-    bool anyNonZero = false;
+    bool anyNonZero  = false;
+    bool anyRamping  = false;
 
     for (int i = 0; i < 4; i++) {
         float diff    = targetV[i] - currentV[i];
@@ -229,6 +230,7 @@ void updateMotors() {
         if (absDiff < 0.5f) {
             currentV[i] = targetV[i];   // 목표에 충분히 가까우면 즉시 고정
         } else {
+            anyRamping = true;
             // 현재 속력보다 목표 속력이 크면 가속, 아니면 감속
             float rate = (fabsf(targetV[i]) >= fabsf(currentV[i]))
                          ? (float)ACCEL_STEP
@@ -241,6 +243,15 @@ void updateMotors() {
     }
 
     motorsOn = anyNonZero;
+
+    // 디버그: 가감속 진행중일 때만 출력 (50ms 마다)
+    static unsigned long lastDbg = 0;
+    if (anyRamping && millis() - lastDbg > 50) {
+        lastDbg = millis();
+        Serial.printf("[RAMP] cur=%4d %4d %4d %4d  tgt=%4d %4d %4d %4d\n",
+            (int)currentV[0], (int)currentV[1], (int)currentV[2], (int)currentV[3],
+            (int)targetV[0],  (int)targetV[1],  (int)targetV[2],  (int)targetV[3]);
+    }
 }
 
 // =============================================================
