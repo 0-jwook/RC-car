@@ -416,7 +416,6 @@ void wifiSetup() {
         Serial.printf("  SSID     : %s\n", AP_SSID);
         Serial.printf("  Password : %s\n", AP_PASSWORD);
         Serial.printf("  IP Addr  : %s\n", WiFi.softAPIP().toString().c_str());
-        Serial.println("  브라우저에서 위 IP 주소로 접속하세요");
         Serial.println("--------------------------------------------");
 
     } else {
@@ -440,7 +439,6 @@ void wifiSetup() {
         Serial.println("--------------------------------------------");
         Serial.println("[WiFi] STA Mode - 연결 성공!");
         Serial.printf("  IP Addr  : %s\n", WiFi.localIP().toString().c_str());
-        Serial.println("  브라우저에서 위 IP 주소로 접속하세요");
         Serial.println("--------------------------------------------");
     }
 }
