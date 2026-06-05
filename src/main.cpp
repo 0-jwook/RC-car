@@ -365,38 +365,52 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
 // =============================================================
 void pollTask(void* param) {
     WiFiClientSecure client;
-    client.setInsecure();   // 인증서 검증 생략 (HTTPS 사용)
+    client.setInsecure();
+    HTTPClient http;
+    http.setTimeout(800);
+    bool connected = false;
 
     for (;;) {
-        if (WiFi.status() == WL_CONNECTED) {
-            HTTPClient http;
+        if (WiFi.status() != WL_CONNECTED) {
+            if (connected) { http.end(); connected = false; }
+            Serial.println("[POLL] WiFi 끊김 - 재연결 대기");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        // 연결이 없으면 한 번만 TLS 핸드셰이크
+        if (!connected) {
+            Serial.println("[POLL] 서버 연결 중...");
             if (http.begin(client, POLL_URL)) {
-                http.setTimeout(800);
                 http.addHeader("Connection", "keep-alive");
-                int code = http.GET();
+                connected = true;
+                Serial.println("[POLL] 연결 완료");
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+        }
 
-                if (code == HTTP_CODE_OK) {
-                    String body = http.getString();
+        int code = http.GET();
 
-                    StaticJsonDocument<128> doc;
-                    if (deserializeJson(doc, body) == DeserializationError::Ok &&
-                        doc.containsKey("direction"))
-                    {
-                        const char* dir = doc["direction"] | "center";
-                        float vx, vy, w;
-                        if (dirToVector(dir, vx, vy, w)) {
-                            driveRobot(vx, vy, w, 50.0f);
-                            lastCmdMs = millis();
-                        }
-                        Serial.printf("[POLL] direction=%s\n", dir);
-                    }
-                } else {
-                    Serial.printf("[POLL] HTTP error: %d\n", code);
+        if (code == HTTP_CODE_OK) {
+            String body = http.getString();
+            StaticJsonDocument<128> doc;
+            if (deserializeJson(doc, body) == DeserializationError::Ok &&
+                doc.containsKey("direction"))
+            {
+                const char* dir = doc["direction"] | "center";
+                float vx, vy, w;
+                if (dirToVector(dir, vx, vy, w)) {
+                    driveRobot(vx, vy, w, 50.0f);
+                    lastCmdMs = millis();
                 }
-                http.end();
+                Serial.printf("[POLL] direction=%s\n", dir);
             }
         } else {
-            Serial.println("[POLL] WiFi 연결 끊김 - 재연결 대기중");
+            Serial.printf("[POLL] 오류 %d - 재연결\n", code);
+            http.end();
+            connected = false;
         }
 
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
