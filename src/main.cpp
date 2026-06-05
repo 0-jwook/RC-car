@@ -67,13 +67,13 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 // =============================================================
 // [사용자 설정] 워치독 타임아웃
 // =============================================================
-#define WATCHDOG_MS  500    // 500ms 이상 명령 없으면 자동 정지
+#define WATCHDOG_MS  1500   // 폴링 지연을 고려한 타임아웃
 
 // =============================================================
 // [사용자 설정] 폴링 설정
 // =============================================================
 #define POLL_URL  "https://nota.mieung.kr/direction"
-#define POLL_MS   150    // 폴링 간격 (ms), 낮출수록 반응 빠름
+#define POLL_MS   50     // 폴링 간격 (ms)
 
 // =============================================================
 // [사용자 설정] 가감속 (10ms 업데이트 주기 기준)
@@ -210,7 +210,6 @@ void driveRobot(float vx, float vy, float w, float speed) {
     for (int i = 0; i < 4; i++) {
         targetV[i] = raw[i] * scale;
     }
-    motorsOn = true;
 }
 
 // =============================================================
@@ -372,7 +371,7 @@ void pollTask(void* param) {
         if (WiFi.status() == WL_CONNECTED) {
             HTTPClient http;
             if (http.begin(client, POLL_URL)) {
-                http.setTimeout(400);
+                http.setTimeout(200);
                 int code = http.GET();
 
                 if (code == HTTP_CODE_OK) {
