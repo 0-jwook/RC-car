@@ -15,6 +15,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <ArduinoJson.h>
@@ -25,7 +27,7 @@
 // =============================================================
 // true  → AP 모드: ESP32가 직접 핫스팟 생성 (인터넷 불필요, 권장)
 // false → STA 모드: 기존 공유기에 연결
-#define WIFI_AP_MODE   true
+#define WIFI_AP_MODE   false
 
 const char* AP_SSID     = "RCCAR_Robot";   // AP 모드 SSID
 const char* AP_PASSWORD = "12345678";       // AP 모드 비밀번호 (최소 8자)
@@ -66,6 +68,12 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 // [사용자 설정] 워치독 타임아웃
 // =============================================================
 #define WATCHDOG_MS  500    // 500ms 이상 명령 없으면 자동 정지
+
+// =============================================================
+// [사용자 설정] 폴링 설정
+// =============================================================
+#define POLL_URL  "https://nota.mieung.kr/direction"
+#define POLL_MS   150    // 폴링 간격 (ms), 낮출수록 반응 빠름
 
 // =============================================================
 // [사용자 설정] 가감속 (10ms 업데이트 주기 기준)
@@ -353,6 +361,49 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
 }
 
 // =============================================================
+// nota.mieung.kr/direction 폴링 태스크
+// loop()를 막지 않도록 FreeRTOS 별도 태스크로 실행
+// =============================================================
+void pollTask(void* param) {
+    WiFiClientSecure client;
+    client.setInsecure();   // 인증서 검증 생략 (HTTPS 사용)
+
+    for (;;) {
+        if (WiFi.status() == WL_CONNECTED) {
+            HTTPClient http;
+            if (http.begin(client, POLL_URL)) {
+                http.setTimeout(400);
+                int code = http.GET();
+
+                if (code == HTTP_CODE_OK) {
+                    String body = http.getString();
+
+                    StaticJsonDocument<128> doc;
+                    if (deserializeJson(doc, body) == DeserializationError::Ok &&
+                        doc.containsKey("direction"))
+                    {
+                        const char* dir = doc["direction"] | "center";
+                        float vx, vy, w;
+                        if (dirToVector(dir, vx, vy, w)) {
+                            driveRobot(vx, vy, w, 50.0f);
+                            lastCmdMs = millis();
+                        }
+                        Serial.printf("[POLL] direction=%s\n", dir);
+                    }
+                } else {
+                    Serial.printf("[POLL] HTTP error: %d\n", code);
+                }
+                http.end();
+            }
+        } else {
+            Serial.println("[POLL] WiFi 연결 끊김 - 재연결 대기중");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+    }
+}
+
+// =============================================================
 // Wi-Fi 초기화
 // =============================================================
 void wifiSetup() {
@@ -416,42 +467,17 @@ void setup() {
         req->send(200, "text/html", index_html);
     });
 
-    // ── GET /direction?direction=up&speed=50 ────────────────
-    server.on("/direction", HTTP_GET, [](AsyncWebServerRequest* req) {
-        AsyncWebServerResponse* res;
-
-        if (!req->hasParam("direction")) {
-            res = req->beginResponse(400, "application/json", "{\"status\":\"error\",\"msg\":\"missing direction\"}");
-            res->addHeader("Access-Control-Allow-Origin", "*");
-            req->send(res);
-            return;
-        }
-
-        String dir = req->getParam("direction")->value();
-        float vx, vy, w;
-        if (!dirToVector(dir.c_str(), vx, vy, w)) {
-            res = req->beginResponse(400, "application/json", "{\"status\":\"error\",\"msg\":\"unknown direction\"}");
-            res->addHeader("Access-Control-Allow-Origin", "*");
-            req->send(res);
-            return;
-        }
-
-        driveRobot(vx, vy, w, 50.0f);
-        lastCmdMs = millis();
-        Serial.printf("[HTTP] direction=%s\n", dir.c_str());
-
-        res = req->beginResponse(200, "application/json", "{\"status\":\"ok\"}");
-        res->addHeader("Access-Control-Allow-Origin", "*");
-        req->send(res);
-    });
-
     // ── 404 핸들러 ──
     server.onNotFound([](AsyncWebServerRequest* req) {
         req->send(404, "text/plain", "Not Found");
     });
 
     server.begin();
-    Serial.println("[HTTP] Web server started  →  Open browser to robot IP");
+    Serial.println("[HTTP] Web server started");
+
+    // ── nota.mieung.kr 폴링 태스크 시작 (Core 0, WiFi와 같은 코어) ──
+    xTaskCreatePinnedToCore(pollTask, "poll", 8192, nullptr, 1, nullptr, 0);
+    Serial.printf("[POLL] 폴링 시작: %s  간격: %dms\n", POLL_URL, POLL_MS);
 }
 
 // =============================================================
