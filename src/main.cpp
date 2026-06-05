@@ -73,7 +73,7 @@ const char* STA_PASS    = "bssm_free";   // STA 모드: 공유기 비밀번호
 // [사용자 설정] 폴링 설정
 // =============================================================
 #define POLL_URL  "https://nota.mieung.kr/direction"
-#define POLL_MS   50     // 폴링 간격 (ms)
+#define POLL_MS   100    // 폴링 간격 (ms)
 
 // =============================================================
 // [사용자 설정] 가감속 (10ms 업데이트 주기 기준)
@@ -371,7 +371,8 @@ void pollTask(void* param) {
         if (WiFi.status() == WL_CONNECTED) {
             HTTPClient http;
             if (http.begin(client, POLL_URL)) {
-                http.setTimeout(200);
+                http.setTimeout(800);
+                http.addHeader("Connection", "keep-alive");
                 int code = http.GET();
 
                 if (code == HTTP_CODE_OK) {
