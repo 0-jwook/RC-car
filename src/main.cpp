@@ -328,11 +328,12 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
                     vy    = constrain((float)(doc["vy"]    | 0.0f), -1.0f, 1.0f);
                     w     = constrain((float)(doc["w"]     | 0.0f), -1.0f, 1.0f);
                     speed = constrain((float)(doc["speed"] | 50.0f), 0.0f, 100.0f);
+                    Serial.printf("[WS]  vx=%.2f  vy=%.2f  w=%.2f  speed=%.0f\n", vx, vy, w, speed);
 
                 } else {
                     // ── [3] 평문 방향 문자열: "F", "BL" 등 ────
                     if (!dirToVector(buf, vx, vy, w)) return;
-                    Serial.printf("[CMD] plain=%s\n", buf);
+                    Serial.printf("[WS]  plain=%s\n", buf);
                 }
 
                 driveRobot(vx, vy, w, speed);
@@ -359,10 +360,13 @@ void wifiSetup() {
         // ── AP 모드 ──────────────────────────────────────────
         WiFi.mode(WIFI_AP);
         WiFi.softAP(AP_SSID, AP_PASSWORD);
-        Serial.println("[WiFi] AP Mode");
-        Serial.printf("  SSID    : %s\n", AP_SSID);
-        Serial.printf("  Password: %s\n", AP_PASSWORD);
-        Serial.printf("  IP Addr : %s\n", WiFi.softAPIP().toString().c_str());
+        Serial.println("--------------------------------------------");
+        Serial.println("[WiFi] AP Mode - 핫스팟 시작됨");
+        Serial.printf("  SSID     : %s\n", AP_SSID);
+        Serial.printf("  Password : %s\n", AP_PASSWORD);
+        Serial.printf("  IP Addr  : %s\n", WiFi.softAPIP().toString().c_str());
+        Serial.println("  브라우저에서 위 IP 주소로 접속하세요");
+        Serial.println("--------------------------------------------");
 
     } else {
         // ── STA 모드 ─────────────────────────────────────────
@@ -382,8 +386,11 @@ void wifiSetup() {
             delay(300);
             Serial.print(".");
         }
-        Serial.printf("\n[WiFi] Connected! IP: %s\n",
-                      WiFi.localIP().toString().c_str());
+        Serial.println("--------------------------------------------");
+        Serial.println("[WiFi] STA Mode - 연결 성공!");
+        Serial.printf("  IP Addr  : %s\n", WiFi.localIP().toString().c_str());
+        Serial.println("  브라우저에서 위 IP 주소로 접속하세요");
+        Serial.println("--------------------------------------------");
     }
 }
 
